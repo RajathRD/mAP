@@ -1,6 +1,7 @@
 VAL_PATH = "/home/rajath/work/iisc/data/coco/annotations/instances_val2017.json"
 DET_PATH = "./det_results/<result_name>/detections_val2017_results.json"
 IMG_PATH = "/home/rajath/work/iisc/data/coco/images/val2017"
+VOC_PATH = "/home/rajath/work/iisc/data/VOCdevkit/VOC2012/Annotations"
 
 import glob
 import json
@@ -10,6 +11,7 @@ import operator
 import sys
 import argparse
 import math
+import xml.etree.ElementTree as ET 
 
 import numpy as np
 
@@ -22,6 +24,7 @@ parser.add_argument('-q', '--quiet', help="minimalistic console output.", action
 # argparse receiving list of cats to be ignored
 parser.add_argument('-i', '--ignore', nargs='+', type=str, help="ignore a list of cats.")
 parser.add_argument('-rn', '--result-name', dest="rn", help="name of result folder", action="store", default=None)
+parser.add_argument("--dataset", dest="dataset", help="coco or voc", action="store", default=None)
 # argparse receiving list of cats with specific IoU (e.g., python main.py --set-cat-iou person 0.7)
 parser.add_argument('--set-cat-iou', nargs='+', type=str, help="set IoU for a specific cat.")
 args = parser.parse_args()
@@ -425,24 +428,42 @@ print ("Loading ground truth results:", VAL_PATH)
 gt_counter_per_cat = {}
 counter_images_per_cat = {}
 ground_truth = {}
-gt_data = json.load(open(VAL_PATH))
-
-for d in gt_data["annotations"]:
-    image_id = ("000000000000"+str(d["image_id"]))[-12:]
-    if image_id not in ground_truth:
-        ground_truth[image_id] = [d]
-    else:
-        ground_truth[image_id].append(d)
 
 # check if there is a correspondent detection-results file
 
 already_seen_cats = []
 
 print("Generating ground truth files...")
+if args.dataset == "coco":
+    gt_data = json.load(open(VAL_PATH))
+    for d in gt_data["annotations"]:
+        image_id = ("000000000000"+str(d["image_id"]))[-12:]
+        if image_id not in ground_truth:
+            ground_truth[image_id] = [d]
+        else:
+            ground_truth[image_id].append(d)
+
+elif args.dataset == "voc":
+    gt_data = glob.glob(os.path.join(VOC_PATH, "*"))
+    for path in gt_data:
+        image_id = os.path.basename(path).split('.xml')[0]
+        tree = ET.parse(path) 
+        root = tree.getroot()
+        ground_truth[image_id] = []
+        for ele in root.findall('object'):
+            difficult = int(ele.find('difficult').text)
+            cat_id = ele.find('name').text
+            bbox = ele.find('bndbox')    
+            left, top, right, bottom = map(float, [bbox.find('xmin').text, bbox.find('ymax').text, bbox.find('xmax').text, bbox.find('ymin').text])
+            ground_truth[image_id].append({"category_id": cat_id, "bbox": [left, top, right-left, top-bottom], "difficult": difficult})
+
+else: 
+    error("Please set --dataset flag to coco or voc. Make sure to check voc and coco path")
+
 for image_id in ground_truth:
     bounding_boxes = []
     for d in ground_truth[image_id]:
-        cat_id, left, top, right, bottom = str(d["category_id"]), str(d["bbox"][0]), str(d["bbox"][1]), str(d["bbox"][0]+d["bbox"][2]), str(d["bbox"][1]+d["bbox"][3])
+        cat_id, left, top, right, bottom = str(d["category_id"]), str(d["bbox"][0]), str(d["bbox"][1]), str(d["bbox"][0]+d["bbox"][2]), str(d["bbox"][1]-d["bbox"][3])
         # check if cat_id is in the ignore list, if yes skip
         if cat_id not in set(dr_cats):
             continue
@@ -451,7 +472,7 @@ for image_id in ground_truth:
         bounding_boxes.append({"cat_id": cat_id, "bbox": bbox, "used":False})
         # count that object
         if cat_id in gt_counter_per_cat:
-            gt_counter_per_cat[cat_id] += 1
+            gt_counter_per_cat[cat_id] += 1 
         else:
             # if cat didn't exist yet
             gt_counter_per_cat[cat_id] = 1
