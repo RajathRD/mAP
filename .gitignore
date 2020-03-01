@@ -1,0 +1,7 @@
+*.json
+*.pkl
+*.png
+*.jpg
+*.jpeg
+*.txt
+.ipynb_checkpoints
